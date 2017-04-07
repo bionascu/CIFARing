@@ -1,9 +1,153 @@
 import cPickle
 import numpy as np
 import matplotlib.pyplot as plt
-# import seaborn as sns
+import scipy.misc
 
-# sns.set()
+
+class LinearClassifier:
+
+	def __init__(self, W, b, learning_rate, reg_strength):
+		self.name = "Abstract"
+		self.W = W
+		self.b = b
+		self.learning_rate = learning_rate
+		self.reg_strength = reg_strength
+
+	def evaluate_classifier(self, X):
+		raise NotImplementedError("Should have implemented this")
+
+	def compute_cost(self, X, y):
+		raise NotImplementedError("Should have implemented this")
+
+	def compute_accuracy(self, X, y):
+		scores = self.evaluate_classifier(X)
+		acc = np.mean(np.argmax(scores, axis=1) == y)
+		return acc
+
+	def compute_gradients(self, X, y, scores):
+		raise NotImplementedError("Should have implemented this")
+
+	def gradient_check(self):
+		raise NotImplementedError("Should have implemented this")
+
+	def mini_batch_gradient_descent(self, X, y, n_batch):
+		for j in range(X.shape[0] / n_batch): 
+			start = j * n_batch 
+			end = (j + 1) * n_batch - 1	
+			batch_X = X[start:end, ] 
+			batch_y = y[start:end, ]
+			scores = self.evaluate_classifier(batch_X)
+			grad_W, grad_b = self.compute_gradients(batch_X, batch_y, scores)
+			self.W -= self.learning_rate * grad_W
+			self.b -= self.learning_rate * grad_b 
+
+	def vanilla_gradient_descent(self, train_data, train_labels, valid_data,
+			valid_labels, n_epochs, n_batch):
+		# Losses
+		train_loss = np.zeros(n_epochs)
+		valid_loss = np.zeros(n_epochs) 
+		# Accuracies
+		train_acc = np.zeros(n_epochs)
+		valid_acc = np.zeros(n_epochs)
+		# Train
+		for ep in range(n_epochs):
+			#print "Epoch ", ep + 1
+			self.mini_batch_gradient_descent(train_data, train_labels, n_batch)
+			train_loss[ep] = self.compute_cost(train_data, train_labels)
+			valid_loss[ep] = self.compute_cost(valid_data, valid_labels)
+			train_acc[ep] = self.compute_accuracy(train_data, train_labels)
+			valid_acc[ep] = self.compute_accuracy(valid_data, valid_labels)
+		return train_loss, valid_loss, train_acc, valid_acc
+
+	def plot_loss(self, train_loss, valid_loss, n_epochs):
+		epochs = np.arange(1, n_epochs + 1)
+		plt.plot(epochs, train_loss, label="training loss")
+		plt.plot(epochs, valid_loss, label="validation loss")
+		plt.xlabel("Epochs")
+		plt.ylabel("Loss")
+		plt.legend(loc='upper right', shadow=True)
+		plt.show()
+
+	def plot_accuracy(self, train_acc, valid_acc, n_epochs):
+		epochs = np.arange(1, n_epochs + 1)
+		plt.plot(epochs, train_acc, label="training accuracy")
+		plt.plot(epochs, valid_acc, label="validation accuracy")
+		plt.xlabel("Epochs")
+		plt.ylabel("Accuracy")
+		plt.legend(loc='lower right', shadow=True)
+		plt.show()
+
+	def plot_loss_acc(self, train_loss, valid_loss, train_acc, valid_acc, n_epochs):
+		epochs = np.arange(1, n_epochs + 1)
+		fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+		# Loss
+		axes[0].plot(epochs, train_loss, label="training loss")
+		axes[0].plot(epochs, valid_loss, label="validation loss")
+		axes[0].set_xlabel("Epochs")
+		axes[0].set_ylabel("Loss")
+		axes[0].legend(loc='upper right', shadow=True)
+		# Accuracy
+		axes[1].plot(epochs, train_acc, label="training accuracy")
+		axes[1].plot(epochs, valid_acc, label="validation accuracy")
+		axes[1].set_xlabel("Epochs")
+		axes[1].set_ylabel("Accuracy")
+		axes[1].legend(loc='lower right', shadow=True)
+		plt.show()
+
+	def visualize_weight_matrix(self):
+		d = unpickle("cifar-10-batches-py/batches.meta")
+		label_names = d["label_names"]
+		fig, axes = plt.subplots(1, 10, figsize=(16, 16))
+		for i in range(10):
+			img = self.W[:, i].reshape(3, 32, 32);
+			img = np.divide(img - np.amin(img), np.amax(img) - np.amin(img))
+			axes[i].set_axis_off()
+			axes[i].set_title("{}".format(label_names[i]))
+			axes[i].imshow(np.transpose(img, (1, 2, 0)), interpolation='bicubic')
+		plt.show()
+
+	def __repr__(self):
+		return ("{} linear classifier\n\tweight matrix [{} x {}]\n\tbias vector"
+		" [{} x {}]\n\tlearning rate {}\n\tregularization stregth {}").format(
+		self.name, self.W.shape[0], self.W.shape[1], self.b.shape[0], 
+		self.b.shape[1], self.learning_rate, self.reg_strength)
+
+
+class SoftmaxClassifier(LinearClassifier):
+
+	def __init__(self, W, b, learning_rate, reg_strength):
+		LinearClassifier.__init__(self, W, b, learning_rate, reg_strength)
+		self.name = "Softmax"
+
+	def evaluate_classifier(self, X):
+		# Evaluate the class scores (unnormalized log probabilities of the classes)
+		scores = np.dot(X, self.W) + self.b # [N x K]
+		# Compute the normalized class probabilities
+		exp_scores = np.exp(scores)
+		probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True) # [N x K]
+		return probs
+
+	def compute_cost(self, X, y):
+		probs = self.evaluate_classifier(X)
+		correct_logprobs = -np.log(probs[range(probs.shape[0]), y])
+		data_cost = np.sum(correct_logprobs) / probs.shape[0]
+		reg_cost = self.reg_strength * np.sum(self.W * self.W)
+		cost = data_cost + reg_cost
+		return cost
+
+	def compute_gradients(self, X, y, probs): 
+		# Compute the gradient on the scores
+		grad_scores = probs
+		grad_scores[range(X.shape[0]), y] -= 1
+		grad_scores /= X.shape[0]
+		# Backpropate the gradient to the parameters (W,b)
+		grad_W = np.dot(X.T, grad_scores)
+		grad_b = np.sum(grad_scores, axis=0, keepdims=True)
+		# Add regularization gradient
+		grad_W += self.reg_strength * self.W 
+		return grad_W, grad_b
+
+
 
 def unpickle(file):
     """
@@ -39,52 +183,7 @@ def load_batch(filename, batch=None):
 		y = np.uint8(np.concatenate(y))
 	# Convert the data to be between 0 and 1
 	x /= np.amax(np.abs(x))
-	# Stack 2D arrays (images) into a single 3D array for processing
-	# x = np.dstack((x[:, :1024], x[:, 1024:2048], x[:, 2048:]))
 	return x, y
-
-
-def evaluate_classifier(X, W, b):
-	# Evaluate the class scores (unnormalized log probabilities of the classes)
-	scores = np.dot(X, W) + b # [N x K]
-	# Compute the normalized class probabilities
-	exp_scores = np.exp(scores)
-	probs = exp_scores / np.sum(exp_scores, axis=1, keepdims=True) # [N x K]
-	return probs
-
-
-def compute_cost(X, y, W, b, reg_strength):
-	probs = evaluate_classifier(X, W, b)
-	correct_logprobs = -np.log(probs[range(probs.shape[0]), y])
-	data_cost = np.sum(correct_logprobs) / probs.shape[0]
-	reg_cost = reg_strength * np.sum(W * W)
-	cost = data_cost + reg_cost
-	return cost
-
-
-def compute_accuracy(X, y, W, b):
-	probs = evaluate_classifier(X, W, b)
-	acc = np.mean(np.argmax(probs, axis=1) == y)
-	return acc
-
-
-def compute_gradients(X, y, probs, W, reg_strength): # todo implement gradient check
-	# Compute the gradient on the scores
-	grad_scores = probs
-	grad_scores[range(X.shape[0]), y] -= 1
-	grad_scores /= X.shape[0]
-	# Backpropate the gradient to the parameters (W,b)
-	grad_W = np.dot(X.T, grad_scores)
-	grad_b = np.sum(grad_scores, axis=0, keepdims=True)
-	# Add regularization gradient
-	grad_W += reg_strength * W 
-	return grad_W, grad_b
-
-
-def mini_batch_gradient_descent(X, y, W, b, learning_rate, reg_strength):
-	probs = evaluate_classifier(X, W, b)
-	grad_W, grad_b = compute_gradients(X, y, probs, W, reg_strength)
-	return W - learning_rate * grad_W, b - learning_rate * grad_b 
 
 
 
@@ -105,49 +204,29 @@ if __name__ == '__main__':
 	learning_rate = 0.01 # eta
 	reg_strength = 0 # lambda
 
-	# Other gradient descent parameters
-	n_epochs = 40
+	# Create classifier instance
+	softmax = SoftmaxClassifier(W, b, learning_rate, reg_strength)
+	print softmax
+
+	# Set other gradient descent parameters
+	n_epochs = 20
 	n_batch = 100
 
-	# Losses
-	train_loss = np.zeros(n_epochs)
-	valid_loss = np.zeros(n_epochs) 
-	train_acc = np.zeros(n_epochs)
-	valid_acc = np.zeros(n_epochs)
-
-	for ep in range(n_epochs):
-		print "Epoch ", ep + 1
-		for j in range (N / n_batch): # todo make sure this is how mini batch gradient descent works
-			start = j * n_batch 
-			end = (j + 1) * n_batch - 1	
-			batch_data = train_data[start:end, ] 
-			batch_labels = train_labels[start:end, ]
-			W, b = mini_batch_gradient_descent(batch_data, batch_labels, W, b, 
-				learning_rate, reg_strength)
-		train_loss[ep] = compute_cost(train_data, train_labels, W, b, reg_strength)
-		valid_loss[ep] = compute_cost(valid_data, valid_labels, W, b, reg_strength)
-		train_acc[ep] = compute_accuracy(train_data, train_labels, W, b)
-		valid_acc[ep] = compute_accuracy(valid_data, valid_labels, W, b)
+	train_loss, valid_loss, train_acc, valid_acc = \
+		softmax.vanilla_gradient_descent(train_data, train_labels, valid_data, \
+		valid_labels, n_epochs, n_batch)
 
 	# Plot loss
-	epochs = np.arange(1, n_epochs+1)
-	plt.plot(epochs, train_loss, label="training loss")
-	plt.plot(epochs, valid_loss, label="validation loss")
-	plt.xlabel("Epochs")
-	plt.ylabel("Loss")
-	plt.legend(loc='upper right', shadow=True)
-	plt.show()
+	softmax.plot_loss(train_loss, valid_loss, n_epochs)
 
 	# Plot accuracy
-	plt.plot(epochs, train_acc, label="training accuracy")
-	plt.plot(epochs, valid_acc, label="validation accuracy")
-	plt.xlabel("Epochs")
-	plt.ylabel("Accuracy")
-	plt.legend(loc='lower right', shadow=True)
-	plt.show()
+	softmax.plot_accuracy(train_acc, valid_acc, n_epochs)
+
+	# visualize W
+	softmax.visualize_weight_matrix()
 
 	# Compute the accuracy of the learnt classifier on the test data
-	accuracy = compute_accuracy(test_data, test_labels, W, b)
+	accuracy = softmax.compute_accuracy(test_data, test_labels)
 	print accuracy
 
 
@@ -155,12 +234,13 @@ if __name__ == '__main__':
 
 
 # to do
-# visualize w
 # gradient check 
 # double check mini batch GD 
 # read more about vanilla/ stochastic/ minibatch GD
 # add comments
-# implement softmax and 
+# implement SVM classifier class
+# improvements from the lab
+# add text to notebook
 
 
 # MY IMPROVEMENTS
